@@ -18,6 +18,6 @@
  
 <div align="center">
 
-## 官网及教程 [https://docs.ocsjs.com](https://docs.ocsjs.com)
+## 官网及教程 [查看详情](https://kukuqi666.github.io/ocs-docs/)
 
 </div>
