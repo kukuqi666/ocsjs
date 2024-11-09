@@ -13,7 +13,21 @@ import {
 	domSearchAll,
 	SearchInformation
 } from '@ocsjs/core';
-import { $modal, $message, h, $store, $menu, MessageElement, Project, Script, $el, $gm, $$el, $ui } from 'easy-us';
+import {
+	$modal,
+	$message,
+	h,
+	$store,
+	$menu,
+	MessageElement,
+	Project,
+	Script,
+	$el,
+	$gm,
+	$$el,
+	$ui,
+	cors
+} from 'easy-us';
 
 import { CommonProject } from './common';
 import { workNotes, volume, playbackRate } from '../utils/configs';
@@ -49,6 +63,7 @@ try {
 } catch (e) {
 	console.warn('[ocsjs] fail of find top');
 	console.warn(e);
+	top = window.top;
 }
 
 try {
@@ -178,6 +193,16 @@ export const CXProject = Project.create({
 					},
 					defaultValue: 'random' as VideoQuizStrategy
 				},
+				mode: {
+					label: '跳转模式',
+					tag: 'select',
+					options: [
+						['next', '完成后跳转下一节', '完成小节后，自动点击下一节按钮'],
+						['job', '完成后跳转未完成任务点（试验功能）', '如果未找到任务点，则会直接结束脚本运行，目前处于试验阶段。'],
+						['manually', '完成后暂停，等待手动跳转', '适用于自己手动运行']
+					],
+					defaultValue: 'next' as 'next' | 'job' | 'manually'
+				},
 				restudy: {
 					label: '复习模式',
 					attrs: { title: '已经完成的视频继续学习，并从当前的章节往下开始学习', type: 'checkbox' },
@@ -190,11 +215,6 @@ export const CXProject = Project.create({
 						title: '当章节已经学习完成至最后一章时，跳转到第一个章节重新开始学习。'
 					},
 					defaultValue: false
-				},
-				autoNextPage: {
-					label: '自动下一章',
-					attrs: { type: 'checkbox' },
-					defaultValue: true
 				},
 				showTextareaWhenEdit: {
 					label: '编辑时显示自定义编辑框',
@@ -225,22 +245,22 @@ export const CXProject = Project.create({
 				 */
 				enableMedia: {
 					separator: '任务点开关',
-					label: '开启-视频/音频自动播放',
+					label: '视频/音频自动播放',
 					attrs: { type: 'checkbox', title: '开启：音频和视频的自动播放' },
 					defaultValue: true
 				},
 				enablePPT: {
-					label: '开启-PPT/书籍自动完成',
+					label: 'PPT/书籍自动完成',
 					attrs: { type: 'checkbox', title: '开启：PPT/书籍自动翻阅' },
 					defaultValue: true
 				},
 				enableChapterTest: {
-					label: '开启-章节测试自动答题',
+					label: '章节测试自动答题',
 					attrs: { type: 'checkbox', title: '开启：章节测试自动答题' },
 					defaultValue: true
 				},
 				enableHyperlink: {
-					label: '开启-链接任务自动完成',
+					label: '链接任务自动完成',
 					attrs: { type: 'checkbox', title: '开启：章节测试自动答题' },
 					defaultValue: true
 				}
@@ -906,11 +926,17 @@ const CXAnalyses = {
 		}
 		return false;
 	},
-	/** 是否处于最后一小节 */
+	/**
+	 * 是否处于最后一小节
+	 * 当小节为0，返回 true
+	 */
 	isInFinalTab() {
 		// 上方小节任务栏
 		const tabs = Array.from(top?.document.querySelectorAll('.prev_ul li') || []);
-		return tabs.length && tabs[tabs.length - 1].classList.contains('active');
+		if (tabs.length === 0) {
+			return true;
+		}
+		return tabs[tabs.length - 1].classList.contains('active');
 	},
 	/** 是否处于最后一个章节 */
 	isInFinalChapter() {
@@ -959,6 +985,18 @@ const CXAnalyses = {
 			const after = font.querySelector('.after');
 			return after === null ? font : after;
 		}) as HTMLElement[];
+	},
+	/**
+	 * 检测当前章节是否完成
+	 */
+	isCurrentChapterFinished() {
+		const job = top?.document.querySelector('.posCatalog_active');
+		if (job) {
+			if (job.querySelector('.icon_Completed') !== null) {
+				return true;
+			}
+		}
+		return false;
 	}
 };
 
@@ -1112,11 +1150,6 @@ export async function study(opts: {
 
 	// 下一章
 	const next = async () => {
-		const curCourseId = $el<HTMLInputElement>('#curCourseId', top?.document);
-		const curChapterId = $el<HTMLInputElement>('#curChapterId', top?.document);
-		const curClazzId = $el<HTMLInputElement>('#curClazzId', top?.document);
-		const count = $$el('#prev_tab .prev_ul li', top?.document);
-
 		if (CXAnalyses.isInFinalTab()) {
 			if (await CXAnalyses.isStuckInBreakingMode()) {
 				return $modal.alert({
@@ -1149,7 +1182,27 @@ export async function study(opts: {
 				duration: 0,
 				extraTitle: '超星学习通学习脚本'
 			});
-		} else {
+			return;
+		}
+
+		if (CXProject.scripts.study.cfg.mode === 'job') {
+			// 检测当前章节是否完成，如果已经完成则下一章
+			// 如果没有需要完成的章节，则暂停运行
+			if ((await checkChapterFinishedAndSkip(CXAnalyses.isInFinalTab())) === false) {
+				const content = '全部任务点已完成！';
+				$modal.alert({ content: content });
+				CommonProject.scripts.settings.methods.notificationBySetting(content, {
+					duration: 0,
+					extraTitle: '超星学习通学习脚本'
+				});
+			}
+		} else if (CXProject.scripts.study.cfg.mode === 'next') {
+			const curCourseId = $el<HTMLInputElement>('#curCourseId', top?.document);
+			const curChapterId = $el<HTMLInputElement>('#curChapterId', top?.document);
+			const curClazzId = $el<HTMLInputElement>('#curClazzId', top?.document);
+			const count = $$el('#prev_tab .prev_ul li', top?.document);
+
+			// 自动下一个小节（点击下一节）
 			if (curChapterId && curCourseId && curClazzId) {
 				// @ts-ignore
 				top._preChapterId = curChapterId.value;
@@ -1163,18 +1216,20 @@ export async function study(opts: {
 			} else {
 				$console.warn('参数错误，无法跳转下一章，请尝试手动切换。');
 			}
+		} else {
+			$console.warn('未知的跳转模式，请联系作者反馈');
 		}
 	};
 
-	if (CXProject.scripts.study.cfg.autoNextPage) {
-		const msg = '页面任务点已完成，即将切换下一章。';
+	if (CXProject.scripts.study.cfg.mode !== 'manually') {
+		const msg = '页面任务点已完成，即将跳转。';
 		$message.success({ content: msg });
 		$console.info(msg);
 		await $.sleep(5000);
 		next();
 	} else {
-		const msg = '页面任务点已完成，自动下一章已关闭，请手动切换。';
-		$message.warn({ content: msg });
+		const msg = '页面任务点已完成，自动跳转已关闭，请手动跳转。';
+		$message.warn({ content: msg, duration: 0 });
 		$console.warn(msg);
 	}
 }
@@ -1913,3 +1968,32 @@ function answerWrapperEmptyWarning(duration: number) {
 		});
 	}
 }
+
+/**
+ * 检测当前章节是否已经完成，并且跳转到下一个未完成章节
+ * 如果没有未完成章节，则暂停运行
+ */
+const checkChapterFinishedAndSkip = cors.defineTopFunction('cx.checkChapterFinishedAndSkip', (is_in_last_tab) => {
+	if (CXAnalyses.isCurrentChapterFinished() || is_in_last_tab) {
+		let start = false;
+		const jobs = Array.from(top?.document.querySelectorAll<HTMLElement>('.posCatalog_select:not(.firstLayer)') || []);
+		for (const job of jobs) {
+			// 排除当前章节
+			if (job.classList.contains('posCatalog_active')) {
+				start = true;
+				continue;
+			}
+			if (start) {
+				// 排除已完成章节
+				if (job.querySelector('.icon_Completed') !== null) {
+					continue;
+				}
+				if (job.querySelector('.jobUnfinishCount') !== null) {
+					job.querySelector<HTMLElement>('.posCatalog_name')?.click();
+					return true;
+				}
+			}
+		}
+	}
+	return false;
+});

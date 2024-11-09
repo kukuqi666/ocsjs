@@ -326,14 +326,14 @@ export class OCSWorker<E extends RawElements = RawElements> extends CommonEventE
 		callback: (finishedRate: number, uploadable: boolean) => void | Promise<void>;
 	}) {
 		const { results, type, callback } = options;
-		let finished = 0;
-		for (const result of results) {
-			if (result.result?.finish) {
-				finished++;
-			}
-		}
-		const rate = results.length === 0 ? 0 : (finished / results.length) * 100;
 		if (type !== 'nomove') {
+			let finished = 0;
+			for (const result of results) {
+				if (result.result?.finish) {
+					finished++;
+				}
+			}
+			const rate = results.length === 0 ? 0 : (finished / results.length) * 100;
 			if (type === 'force') {
 				return callback(rate, true);
 			} else {

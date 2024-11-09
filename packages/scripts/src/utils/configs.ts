@@ -15,7 +15,7 @@ export const playbackRate: Config = {
 		rate.toString(),
 		rate + ' x'
 	]),
-	defaultValue: 1
+	defaultValue: '1'
 };
 
 /** 音量调节配置  */
